@@ -13,31 +13,72 @@
  * @module apps/api/src/lib/redis
  */
 
-import Redis from 'ioredis';
+import Redis, { type RedisOptions } from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisPassword = process.env.REDIS_PASSWORD;
+
+/**
+ * Redis connection options with security and resilience settings
+ */
+const redisOptions: RedisOptions = {
+  maxRetriesPerRequest: 3,
+  lazyConnect: true,
+  // Connection resilience
+  enableReadyCheck: true,
+  enableOfflineQueue: true,
+  connectTimeout: 10000,
+  // Reconnection strategy with exponential backoff
+  retryStrategy: (times: number) => {
+    if (times > 10) {
+      console.error('Redis: Max reconnection attempts reached');
+      return null; // Stop retrying
+    }
+    const delay = Math.min(times * 100, 3000);
+    console.log(`Redis: Reconnecting in ${delay}ms (attempt ${times})`);
+    return delay;
+  },
+  // Security: Add password if configured
+  ...(redisPassword && { password: redisPassword }),
+};
 
 /**
  * Main Redis client instance for caching and presence operations.
  * Uses lazy connection to allow app startup without Redis being ready.
  */
-export const redis = new Redis(redisUrl, {
-  maxRetriesPerRequest: 3,
-  retryDelayOnFailover: 100,
-  lazyConnect: true,
-});
+export const redis = new Redis(redisUrl, redisOptions);
+
+// Separate Redis client for pub/sub (required by ioredis for blocking operations)
+export const redisSub = new Redis(redisUrl, redisOptions);
+
+let isConnected = false;
 
 redis.on('error', (err) => {
-  console.error('Redis error:', err);
+  console.error('Redis error:', err.message);
+  isConnected = false;
 });
 
 redis.on('connect', () => {
   console.log('Redis connected');
+  isConnected = true;
 });
+
+redis.on('close', () => {
+  console.log('Redis connection closed');
+  isConnected = false;
+});
+
+/**
+ * Check if Redis is currently connected
+ */
+export function isRedisConnected(): boolean {
+  return isConnected;
+}
 
 export async function connectRedis(): Promise<void> {
   try {
     await redis.connect();
+    await redisSub.connect();
   } catch (error) {
     // ioredis may already be connected in lazy mode
     if ((error as Error).message !== 'Redis is already connecting/connected') {
@@ -48,7 +89,7 @@ export async function connectRedis(): Promise<void> {
 }
 
 export async function disconnectRedis(): Promise<void> {
-  await redis.quit();
+  await Promise.all([redis.quit(), redisSub.quit()]);
   console.log('Redis disconnected');
 }
 

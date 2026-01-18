@@ -34,7 +34,14 @@ export const channelRoutes: FastifyPluginAsync = async (fastify) => {
           },
         ],
       },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        topic: true,
+        isPrivate: true,
+        isArchived: true,
+        createdAt: true,
         _count: { select: { members: true } },
         members: {
           where: { userId: request.user.id },
@@ -49,9 +56,9 @@ export const channelRoutes: FastifyPluginAsync = async (fastify) => {
         id: ch.id,
         name: ch.name,
         description: ch.description,
-        topic: (ch as any).topic,
+        topic: ch.topic,
         isPrivate: ch.isPrivate,
-        isArchived: (ch as any).isArchived || false,
+        isArchived: ch.isArchived,
         createdAt: ch.createdAt,
         memberCount: ch._count.members,
         isMember: ch.members.length > 0,

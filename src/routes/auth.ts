@@ -5,6 +5,12 @@ import { prisma } from '../lib/db.js';
 import { signToken, setTokenCookie, clearTokenCookie } from '../lib/auth.js';
 import { errors } from '../lib/errors.js';
 import { authenticate } from '../middleware/auth.js';
+import { 
+  isAccountLocked, 
+  recordFailedLogin, 
+  clearFailedLogins,
+  getRemainingAttempts 
+} from '../lib/security.js';
 
 export const authRoutes: FastifyPluginAsync = async (fastify) => {
   // POST /auth/signup
@@ -63,21 +69,54 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { email, password } = result.data;
+    const normalizedEmail = email.toLowerCase();
+    const clientIp = request.ip;
+
+    // Security: Check if account is locked
+    if (await isAccountLocked(normalizedEmail)) {
+      throw errors.forbidden('Account temporarily locked due to too many failed attempts. Please try again later.');
+    }
 
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
+      // Security: Record failed attempt even for non-existent users
+      await recordFailedLogin(normalizedEmail, clientIp);
       throw errors.invalidCredentials();
+    }
+
+    // Security: Check if user is suspended
+    if (user.isSuspended) {
+      throw errors.forbidden('Your account has been suspended. Please contact support.');
     }
 
     // Verify password
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
-      throw errors.invalidCredentials();
+      // Security: Record failed attempt and check if should lock
+      const shouldLock = await recordFailedLogin(normalizedEmail, clientIp);
+      if (shouldLock) {
+        throw errors.forbidden('Account locked due to too many failed attempts. Please try again in 15 minutes.');
+      }
+      
+      const remaining = await getRemainingAttempts(normalizedEmail);
+      throw errors.unauthorized(`Invalid email or password. ${remaining} attempts remaining.`);
     }
+
+    // Security: Clear failed login attempts on success
+    await clearFailedLogins(normalizedEmail);
+
+    // Update login tracking
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: new Date(),
+        loginCount: { increment: 1 },
+      },
+    });
 
     const authUser = {
       id: user.id,

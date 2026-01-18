@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Dependencies (will be installed fresh)
+node_modules
+packages/*/node_modules
+
+# Build artifacts (will be rebuilt)
+dist
+packages/*/dist
+
+# Development files
+*.md
+*.log
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test files
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+vitest.config.ts
+coverage
+
+# Docker files (no recursion)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Uploads (should use volumes)
+uploads/*
+!uploads/.gitkeep

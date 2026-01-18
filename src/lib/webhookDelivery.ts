@@ -14,7 +14,7 @@ interface WebhookEvent {
   type: string;
   workspaceId: string;
   channelId?: string | null;
-  payload: Record<string, unknown>;
+  payload: object;
 }
 
 /**
@@ -62,7 +62,7 @@ export async function deliverWebhookEvent(event: WebhookEvent): Promise<void> {
 async function deliverToWebhook(
   webhook: { id: string; url: string; secret: string },
   eventType: string,
-  payload: Record<string, unknown>
+  payload: object
 ): Promise<void> {
   const body = JSON.stringify(payload);
   const signature = signPayload(body, webhook.secret);
@@ -73,7 +73,7 @@ async function deliverToWebhook(
     data: {
       webhookId: webhook.id,
       eventType,
-      payload,
+      payload: payload as object,
       status: 'pending',
     },
   });

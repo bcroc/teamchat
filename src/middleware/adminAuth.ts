@@ -84,7 +84,7 @@ export async function logAdminAction(
       action,
       targetType,
       targetId,
-      details,
+      details: details as object,
       ipAddress: request.ip,
       userAgent: request.headers['user-agent'] || null,
     },

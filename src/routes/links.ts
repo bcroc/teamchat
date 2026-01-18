@@ -1,7 +1,6 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { HTTP_STATUS } from '@teamchat/shared';
-import { AppError } from '../lib/errors.js';
+import { errors } from '../lib/errors.js';
 import { authenticate } from '../middleware/auth.js';
 
 // Simple URL metadata fetcher
@@ -150,22 +149,19 @@ const previewSchema = z.object({
 
 export async function linkRoutes(app: FastifyInstance) {
   // Get link preview
-  app.get(
+  app.get<{ Querystring: { url: string } }>(
     '/preview',
     { preHandler: [authenticate] },
-    async (
-      request: FastifyRequest<{ Querystring: { url: string } }>,
-      reply
-    ) => {
+    async (request, reply) => {
       const parsed = previewSchema.safeParse(request.query);
       if (!parsed.success) {
-        throw new AppError('Invalid URL', HTTP_STATUS.BAD_REQUEST, 'INVALID_URL');
+        throw errors.invalidInput('Invalid URL');
       }
 
       const { url } = parsed.data;
 
       if (!isValidUrl(url)) {
-        throw new AppError('Invalid URL', HTTP_STATUS.BAD_REQUEST, 'INVALID_URL');
+        throw errors.invalidInput('Invalid URL format');
       }
 
       // Check cache first

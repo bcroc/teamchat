@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { prisma } from '../lib/db.js';
 import { errors } from '../lib/errors.js';
+import { config } from '../lib/config.js';
 import { authenticate, requireWorkspaceRole, requireChannelAccess } from '../middleware/auth.js';
 import { getSocketServer } from '../socket/index.js';
 import { SOCKET_EVENTS } from '@teamchat/shared';
@@ -137,7 +138,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
           description: w.description,
           channel: w.channel,
           bot: w.bot,
-          webhookUrl: `${process.env.API_URL || 'http://localhost:3000'}/webhooks/incoming/${w.token}`,
+          webhookUrl: `${config.apiUrl}/webhooks/incoming/${w.token}`,
           isEnabled: w.isEnabled,
           createdAt: w.createdAt,
         })),
@@ -179,7 +180,7 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
           name: webhook.name,
           description: webhook.description,
           channel: webhook.channel,
-          webhookUrl: `${process.env.API_URL || 'http://localhost:3000'}/webhooks/incoming/${token}`,
+          webhookUrl: `${config.apiUrl}/webhooks/incoming/${token}`,
           isEnabled: webhook.isEnabled,
           createdAt: webhook.createdAt,
         },

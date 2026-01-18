@@ -107,24 +107,54 @@ export async function requireChannelAccess(
   return { channel };
 }
 
-// Helper to check DM access
+// Helper to check DM access (supports both 1:1 and group DMs)
 export async function requireDmAccess(
   userId: string,
   dmThreadId: string
-): Promise<{ dmThread: { id: string; workspaceId: string; userAId: string; userBId: string } }> {
+): Promise<{ dmThread: { id: string; workspaceId: string; userAId: string | null; userBId: string | null; isGroup: boolean } }> {
   const dmThread = await prisma.dmThread.findUnique({
     where: { id: dmThreadId },
-    select: { id: true, workspaceId: true, userAId: true, userBId: true },
+    select: { 
+      id: true, 
+      workspaceId: true, 
+      userAId: true, 
+      userBId: true,
+      isGroup: true,
+      participants: {
+        where: { userId, leftAt: null },
+        select: { userId: true },
+      },
+    },
   });
 
   if (!dmThread) {
     throw errors.notFound('DM thread');
   }
 
-  // User must be one of the participants
-  if (dmThread.userAId !== userId && dmThread.userBId !== userId) {
+  // Check access based on DM type
+  const isParticipant = dmThread.isGroup
+    ? dmThread.participants.length > 0
+    : dmThread.userAId === userId || dmThread.userBId === userId;
+
+  if (!isParticipant) {
     throw errors.forbidden('You do not have access to this DM');
   }
 
   return { dmThread };
+}
+
+// Helper to verify access for either channel or DM scope
+export async function requireScopeAccess(
+  userId: string,
+  scope: { channelId?: string | null; dmThreadId?: string | null }
+): Promise<{ workspaceId: string; type: 'channel' | 'dm' }> {
+  if (scope.channelId) {
+    const { channel } = await requireChannelAccess(userId, scope.channelId);
+    return { workspaceId: channel.workspaceId, type: 'channel' };
+  }
+  if (scope.dmThreadId) {
+    const { dmThread } = await requireDmAccess(userId, scope.dmThreadId);
+    return { workspaceId: dmThread.workspaceId, type: 'dm' };
+  }
+  throw errors.validation('Either channelId or dmThreadId is required');
 }

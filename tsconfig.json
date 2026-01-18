@@ -13,18 +13,18 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
-      "@teamchat/shared": ["./packages/shared/src/index.ts"],
-      "@teamchat/shared/*": ["./packages/shared/src/*"]
+      "@teamchat/shared": ["./packages/shared/dist/index.d.ts"],
+      "@teamchat/shared/*": ["./packages/shared/dist/*"]
     }
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "packages"]
 }

@@ -98,6 +98,13 @@ export const errors = {
   internal: (message = 'Internal server error') =>
     new AppError(ERROR_CODES.INTERNAL_ERROR, message, HTTP_STATUS.INTERNAL_SERVER_ERROR),
 
+  // General resource errors
+  alreadyExists: (message: string) =>
+    new AppError(ERROR_CODES.ALREADY_EXISTS, message, HTTP_STATUS.CONFLICT),
+
+  invalidInput: (message: string) =>
+    new AppError(ERROR_CODES.VALIDATION_ERROR, message, HTTP_STATUS.BAD_REQUEST),
+
   // Bot errors
   botDisabled: () =>
     new AppError(ERROR_CODES.BOT_DISABLED, 'Bot is disabled', HTTP_STATUS.FORBIDDEN),

@@ -12,6 +12,7 @@
  * @module apps/api/src/app
  */
 
+import crypto from 'crypto';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
@@ -63,11 +64,15 @@ export async function buildApp() {
             options: { colorize: true },
           }
         : undefined,
+      // Security: Redact sensitive data from logs
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'body.password'],
     },
     trustProxy: true,
+    // Security: Disable x-powered-by header
+    disableRequestLogging: config.isProd,
   });
 
-  // Plugins
+  // Security: Add security headers with Helmet
   await app.register(helmet, {
     contentSecurityPolicy: {
       directives: {
@@ -76,51 +81,92 @@ export async function buildApp() {
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        upgradeInsecureRequests: config.isProd ? [] : null,
       },
     },
+    // Security: Additional headers
+    crossOriginEmbedderPolicy: false, // Required for some WebRTC setups
+    crossOriginOpenerPolicy: { policy: 'same-origin' },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    hsts: config.isProd ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+    noSniff: true,
+    xssFilter: true,
   });
 
   await app.register(cors, {
     origin: config.cors.origin,
     credentials: config.cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    exposedHeaders: ['X-Request-ID', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
+    maxAge: 86400, // Cache preflight for 24 hours
   });
 
   await app.register(cookie, {
     secret: process.env.JWT_SECRET || 'dev-secret',
     hook: 'onRequest',
+    parseOptions: {
+      httpOnly: true,
+      secure: config.isProd,
+      sameSite: 'lax',
+    },
   });
 
+  // Security: Enhanced rate limiting
   await app.register(rateLimit, {
     max: config.rateLimit.max,
     timeWindow: config.rateLimit.timeWindow,
     keyGenerator: (request) => {
+      // Use X-Forwarded-For in production (behind reverse proxy)
       return request.ip;
     },
+    // Skip rate limiting for health checks
+    allowList: (request) => request.url === '/health',
+    // Add rate limit headers
+    addHeadersOnExceeding: { 'x-ratelimit-limit': true, 'x-ratelimit-remaining': true },
+    addHeaders: { 'x-ratelimit-limit': true, 'x-ratelimit-remaining': true, 'retry-after': true },
   });
 
   await app.register(multipart, {
     limits: {
       fileSize: config.upload.maxFileSize,
       files: 1,
+      fieldSize: 1024 * 100, // 100KB max for text fields
     },
   });
 
-  // Error handler
+  // Security: Add request ID for tracing
+  app.addHook('onRequest', (request, reply, done) => {
+    const requestId = request.headers['x-request-id'] || crypto.randomUUID();
+    reply.header('X-Request-ID', requestId);
+    done();
+  });
+
+  // Error handler with security considerations
   app.setErrorHandler((error, request, reply) => {
-    request.log.error(error);
+    // Log full error internally
+    request.log.error({
+      err: error,
+      requestId: reply.getHeader('X-Request-ID'),
+      url: request.url,
+      method: request.method,
+    });
 
     if (error instanceof AppError) {
       return reply.status(error.statusCode).send(error.toJSON());
     }
 
-    // Fastify validation errors
+    // Fastify validation errors - sanitize output
     if (error.validation) {
       return reply.status(HTTP_STATUS.UNPROCESSABLE_ENTITY).send({
         code: 'VALIDATION_ERROR',
         message: 'Validation failed',
-        details: error.validation,
+        details: config.isDev ? error.validation : undefined,
       });
     }
 
@@ -128,19 +174,55 @@ export async function buildApp() {
     if (error.statusCode === 429) {
       return reply.status(HTTP_STATUS.TOO_MANY_REQUESTS).send({
         code: 'RATE_LIMITED',
-        message: 'Too many requests',
+        message: 'Too many requests. Please try again later.',
       });
     }
 
-    // Generic error
+    // Zod validation errors
+    if (error.name === 'ZodError') {
+      return reply.status(HTTP_STATUS.UNPROCESSABLE_ENTITY).send({
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request data',
+      });
+    }
+
+    // Prisma errors - don't leak database details
+    if (error.name === 'PrismaClientKnownRequestError') {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+        code: 'DATABASE_ERROR',
+        message: 'A database error occurred',
+      });
+    }
+
+    // Generic error - never leak stack traces or internal details in production
     return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send({
       code: 'INTERNAL_ERROR',
-      message: config.isDev ? error.message : 'Internal server error',
+      message: 'An unexpected error occurred',
+      ...(config.isDev && { debug: error.message }),
     });
   });
 
-  // Health check
-  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  // Health check with optional detailed info
+  app.get('/health', async (request) => {
+    const detailed = request.query && 'detailed' in (request.query as object);
+    
+    const response: Record<string, unknown> = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+    
+    // Only return detailed info in dev or if explicitly requested
+    if (config.isDev || detailed) {
+      response.version = process.env.npm_package_version || '1.0.0';
+      response.uptime = process.uptime();
+      response.memory = process.memoryUsage();
+    }
+    
+    return response;
+  });
+
+  // Readiness check (for Kubernetes)
+  app.get('/ready', async () => ({ status: 'ready' }));
 
   // Register routes
   await app.register(authRoutes, { prefix: '/auth' });

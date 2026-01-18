@@ -11,7 +11,7 @@ import {
 } from '@teamchat/shared';
 import { prisma } from '../lib/db.js';
 import { errors } from '../lib/errors.js';
-import { authenticate, requireChannelAccess, requireDmAccess } from '../middleware/auth.js';
+import { authenticate, requireChannelAccess, requireDmAccess, requireScopeAccess } from '../middleware/auth.js';
 
 // Extend fastify to include io
 declare module 'fastify' {
@@ -42,17 +42,8 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { channelId, dmThreadId, parentId, cursor, limit } = result.data;
 
-    // Verify access
-    let workspaceId: string;
-    if (channelId) {
-      const { channel } = await requireChannelAccess(request.user.id, channelId);
-      workspaceId = channel.workspaceId;
-    } else if (dmThreadId) {
-      const { dmThread } = await requireDmAccess(request.user.id, dmThreadId);
-      workspaceId = dmThread.workspaceId;
-    } else {
-      throw errors.validation('Either channelId or dmThreadId is required');
-    }
+    // Verify access using unified helper
+    const { workspaceId } = await requireScopeAccess(request.user.id, { channelId, dmThreadId });
 
     const where = {
       ...(channelId && { channelId }),
@@ -113,17 +104,8 @@ export const messageRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { channelId, dmThreadId, parentId, body, fileIds } = result.data;
 
-    // Verify access
-    let workspaceId: string;
-    if (channelId) {
-      const { channel } = await requireChannelAccess(request.user.id, channelId);
-      workspaceId = channel.workspaceId;
-    } else if (dmThreadId) {
-      const { dmThread } = await requireDmAccess(request.user.id, dmThreadId);
-      workspaceId = dmThread.workspaceId;
-    } else {
-      throw errors.validation('Either channelId or dmThreadId is required');
-    }
+    // Verify access using unified helper
+    const { workspaceId } = await requireScopeAccess(request.user.id, { channelId, dmThreadId });
 
     // Verify parent message exists and belongs to same scope
     if (parentId) {
