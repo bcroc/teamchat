@@ -1,0 +1,55 @@
+{
+  "name": "teamchat-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TeamChat API server with real-time messaging and WebRTC signaling",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "pnpm build:shared && tsx watch src/index.ts",
+    "build": "pnpm build:shared && tsc -p tsconfig.json",
+    "build:shared": "pnpm --filter @teamchat/shared build",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"**/*.{ts,js,json,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "clean": "rm -rf dist node_modules packages/shared/dist"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.2.0",
+    "@fastify/cors": "^8.4.1",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/multipart": "^8.0.0",
+    "@fastify/rate-limit": "^9.0.1",
+    "@fastify/websocket": "^8.3.1",
+    "@prisma/client": "^5.7.0",
+    "@teamchat/shared": "workspace:*",
+    "argon2": "^0.31.2",
+    "fastify": "^4.24.3",
+    "ioredis": "^5.3.2",
+    "jose": "^5.1.3",
+    "nanoid": "^5.0.4",
+    "socket.io": "^4.7.2",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "pino-pretty": "^10.3.0",
+    "prettier": "^3.1.0",
+    "prisma": "^5.7.0",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.2",
+    "vitest": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

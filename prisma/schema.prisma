@@ -1,0 +1,669 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  passwordHash   String   @map("password_hash")
+  displayName    String   @map("display_name")
+  avatarUrl      String?  @map("avatar_url")
+  status         String   @default("active") // active, away, dnd, invisible
+  customStatus   String?  @map("custom_status")
+  statusExpiry   DateTime? @map("status_expiry")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Server-level admin fields
+  isServerAdmin  Boolean  @default(false) @map("is_server_admin")
+  isSuspended    Boolean  @default(false) @map("is_suspended")
+  suspendedAt    DateTime? @map("suspended_at")
+  suspendedBy    String?  @map("suspended_by")
+  suspendReason  String?  @map("suspend_reason")
+  lastLoginAt    DateTime? @map("last_login_at")
+  loginCount     Int      @default(0) @map("login_count")
+
+  // Relations
+  workspaceMembers   WorkspaceMember[]
+  channelMembers     ChannelMember[]
+  messages           Message[]
+  reactions          Reaction[]
+  readReceipts       ReadReceipt[]
+  uploadedFiles      File[]
+  createdChannels    Channel[]          @relation("ChannelCreator")
+  createdCalls       CallSession[]      @relation("CallCreator")
+  callParticipants   CallParticipant[]
+  auditLogs          AuditLog[]
+  dmThreadsAsUserA   DmThread[]         @relation("DmUserA")
+  dmThreadsAsUserB   DmThread[]         @relation("DmUserB")
+  dmParticipants     DmParticipant[]
+  pinnedMessages     PinnedMessage[]    @relation("PinnedMessages")
+  savedMessages      SavedMessage[]     @relation("SavedMessages")
+  scheduledMessages  ScheduledMessage[] @relation("ScheduledMessages")
+  reminders          Reminder[]         @relation("Reminders")
+  channelSettings    ChannelSettings[]  @relation("ChannelSettings")
+  preferences        UserPreferences?
+  createdBots        Bot[]              @relation("BotCreator")
+  encryptionKeys     UserEncryptionKey[]
+
+  @@map("users")
+}
+
+model Workspace {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  iconUrl     String?  @map("icon_url")
+  isPublic    Boolean  @default(false) @map("is_public") // Allow join without invite
+  isDisabled  Boolean  @default(false) @map("is_disabled") // Admin can disable
+  disabledAt  DateTime? @map("disabled_at")
+  disabledBy  String?  @map("disabled_by")
+  maxMembers  Int?     @map("max_members") // Optional member limit
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  members           WorkspaceMember[]
+  channels          Channel[]
+  dmThreads         DmThread[]
+  messages          Message[]
+  files             File[]
+  callSessions      CallSession[]
+  auditLogs         AuditLog[]
+  readReceipts      ReadReceipt[]
+  scheduledMessages ScheduledMessage[]
+  reminders         Reminder[]
+  bots              Bot[]
+  incomingWebhooks  IncomingWebhook[]
+  outgoingWebhooks  OutgoingWebhook[]
+  slashCommands     SlashCommand[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+  role        String    @default("member") // owner, admin, member
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+model Channel {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  name        String
+  description String?
+  topic       String?  // Channel topic (shown in header)
+  isPrivate   Boolean  @default(false) @map("is_private")
+  isArchived  Boolean  @default(false) @map("is_archived")
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator           User              @relation("ChannelCreator", fields: [createdBy], references: [id])
+  members           ChannelMember[]
+  messages          Message[]
+  readReceipts      ReadReceipt[]
+  callSessions      CallSession[]
+  pinnedMessages    PinnedMessage[]
+  channelSettings   ChannelSettings[]
+  incomingWebhooks  IncomingWebhook[]
+
+  @@unique([workspaceId, name])
+  @@map("channels")
+}
+
+model ChannelMember {
+  channelId String   @map("channel_id")
+  userId    String   @map("user_id")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, userId])
+  @@map("channel_members")
+}
+
+model DmThread {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  userAId     String?  @map("user_a_id") // For 1:1 DMs (backward compat)
+  userBId     String?  @map("user_b_id") // For 1:1 DMs (backward compat)
+  isGroup     Boolean  @default(false) @map("is_group")
+  name        String?  // Group DM name (optional)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userA        User?           @relation("DmUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB        User?           @relation("DmUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  participants DmParticipant[] // For group DMs
+  messages     Message[]
+  readReceipts ReadReceipt[]
+  callSessions CallSession[]
+
+  @@unique([workspaceId, userAId, userBId])
+  @@map("dm_threads")
+}
+
+model DmParticipant {
+  id         String   @id @default(uuid())
+  dmThreadId String   @map("dm_thread_id")
+  userId     String   @map("user_id")
+  joinedAt   DateTime @default(now()) @map("joined_at")
+  leftAt     DateTime? @map("left_at")
+
+  dmThread DmThread @relation(fields: [dmThreadId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dmThreadId, userId])
+  @@map("dm_participants")
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  channelId   String?  @map("channel_id")
+  dmThreadId  String?  @map("dm_thread_id")
+  senderId    String   @map("sender_id")
+  botId       String?  @map("bot_id") // For messages sent by bots
+  parentId    String?  @map("parent_id")
+  body        String   // Encrypted ciphertext when E2EE is enabled
+  isDeleted   Boolean  @default(false) @map("is_deleted")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // E2EE fields
+  isEncrypted Boolean  @default(false) @map("is_encrypted")
+  encryptionVersion Int? @map("encryption_version") // Key version used
+  nonce       String?  // Encryption nonce (Base64)
+
+  workspace          Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel            Channel?                   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  dmThread           DmThread?                  @relation(fields: [dmThreadId], references: [id], onDelete: Cascade)
+  sender             User                       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  bot                Bot?                       @relation("BotMessages", fields: [botId], references: [id], onDelete: SetNull)
+  parent             Message?                   @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies            Message[]                  @relation("ThreadReplies")
+  reactions          Reaction[]
+  files              File[]
+  pinnedMessages     PinnedMessage[]
+  savedByUsers       SavedMessage[]
+  interactiveActions InteractiveMessageAction[]
+
+  @@index([channelId, createdAt])
+  @@index([dmThreadId, createdAt])
+  @@index([parentId])
+  @@index([botId])
+  @@map("messages")
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("reactions")
+}
+
+model ReadReceipt {
+  id                String   @id @default(uuid())
+  workspaceId       String   @map("workspace_id")
+  userId            String   @map("user_id")
+  channelId         String?  @map("channel_id")
+  dmThreadId        String?  @map("dm_thread_id")
+  lastReadMessageId String   @map("last_read_message_id")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel   Channel?  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  dmThread  DmThread? @relation(fields: [dmThreadId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channelId])
+  @@unique([userId, dmThreadId])
+  @@map("read_receipts")
+}
+
+model File {
+  id           String   @id @default(uuid())
+  workspaceId  String   @map("workspace_id")
+  uploaderId   String   @map("uploader_id")
+  messageId    String?  @map("message_id")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  size         Int
+  storagePath  String   @map("storage_path")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  uploader  User      @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  message   Message?  @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@map("files")
+}
+
+model CallSession {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  scopeType   String    @map("scope_type") // channel, dm
+  channelId   String?   @map("channel_id")
+  dmThreadId  String?   @map("dm_thread_id")
+  createdBy   String    @map("created_by")
+  status      String    @default("active") // active, ended
+  startedAt   DateTime  @default(now()) @map("started_at")
+  endedAt     DateTime? @map("ended_at")
+
+  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel      Channel?          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  dmThread     DmThread?         @relation(fields: [dmThreadId], references: [id], onDelete: Cascade)
+  creator      User              @relation("CallCreator", fields: [createdBy], references: [id])
+  participants CallParticipant[]
+
+  @@index([channelId, status])
+  @@index([dmThreadId, status])
+  @@map("call_sessions")
+}
+
+model CallParticipant {
+  id            String    @id @default(uuid())
+  callSessionId String    @map("call_session_id")
+  userId        String    @map("user_id")
+  joinedAt      DateTime  @default(now()) @map("joined_at")
+  leftAt        DateTime? @map("left_at")
+
+  callSession CallSession @relation(fields: [callSessionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callSessionId, userId])
+  @@map("call_participants")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  actorId     String   @map("actor_id")
+  action      String
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor     User      @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("audit_logs")
+}
+
+model PinnedMessage {
+  id        String   @id @default(uuid())
+  channelId String   @map("channel_id")
+  messageId String   @map("message_id")
+  pinnedBy  String   @map("pinned_by")
+  pinnedAt  DateTime @default(now()) @map("pinned_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinner  User    @relation("PinnedMessages", fields: [pinnedBy], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, messageId])
+  @@map("pinned_messages")
+}
+
+model SavedMessage {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  messageId String   @map("message_id")
+  savedAt   DateTime @default(now()) @map("saved_at")
+  note      String?
+
+  user    User    @relation("SavedMessages", fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@map("saved_messages")
+}
+
+model ScheduledMessage {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  channelId   String?  @map("channel_id")
+  dmThreadId  String?  @map("dm_thread_id")
+  senderId    String   @map("sender_id")
+  body        String
+  scheduledAt DateTime @map("scheduled_at")
+  status      String   @default("pending") // pending, sent, cancelled
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sender    User      @relation("ScheduledMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@map("scheduled_messages")
+}
+
+model Reminder {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  workspaceId String    @map("workspace_id")
+  messageId   String?   @map("message_id") // Optional - reminder about a specific message
+  text        String    // What to remind about
+  remindAt    DateTime  @map("remind_at")
+  status      String    @default("pending") // pending, completed, dismissed
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation("Reminders", fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, remindAt])
+  @@map("reminders")
+}
+
+model ChannelSettings {
+  id                  String   @id @default(uuid())
+  channelId           String   @unique @map("channel_id")
+  userId              String   @map("user_id")
+  muted               Boolean  @default(false)
+  muteUntil           DateTime? @map("mute_until")
+  notificationLevel   String   @default("all") // all, mentions, none
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation("ChannelSettings", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@map("channel_settings")
+}
+
+model UserPreferences {
+  id                    String   @id @default(uuid())
+  userId                String   @unique @map("user_id")
+  desktopNotifications  Boolean  @default(true) @map("desktop_notifications")
+  soundEnabled          Boolean  @default(true) @map("sound_enabled")
+  notifyOnMentions      Boolean  @default(true) @map("notify_on_mentions")
+  notifyOnDms           Boolean  @default(true) @map("notify_on_dms")
+  theme                 String   @default("system") // light, dark, system
+  fontSize              String   @default("medium") // small, medium, large
+  compactMode           Boolean  @default(false) @map("compact_mode")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// ============================================
+// Bot & Integration Models
+// ============================================
+
+model Bot {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  name        String   // Internal name (slug-like)
+  displayName String   @map("display_name") // Shown in UI
+  description String?
+  avatarUrl   String?  @map("avatar_url")
+  createdBy   String   @map("created_by")
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator          User              @relation("BotCreator", fields: [createdBy], references: [id])
+  tokens           BotToken[]
+  scopes           BotScope[]
+  messages         Message[]         @relation("BotMessages")
+  incomingWebhooks IncomingWebhook[]
+  outgoingWebhooks OutgoingWebhook[]
+  slashCommands    SlashCommand[]
+
+  @@unique([workspaceId, name])
+  @@map("bots")
+}
+
+model BotToken {
+  id           String    @id @default(uuid())
+  botId        String    @map("bot_id")
+  token        String    @unique // Hashed token
+  tokenPrefix  String    @map("token_prefix") // First 8 chars for identification
+  name         String    @default("default") // Token name for identification
+  lastUsedAt   DateTime? @map("last_used_at")
+  expiresAt    DateTime? @map("expires_at")
+  isRevoked    Boolean   @default(false) @map("is_revoked")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("bot_tokens")
+}
+
+model BotScope {
+  id        String   @id @default(uuid())
+  botId     String   @map("bot_id")
+  scope     String   // e.g., "messages:read", "messages:write", "channels:read", "reactions:write"
+  createdAt DateTime @default(now()) @map("created_at")
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, scope])
+  @@map("bot_scopes")
+}
+
+model IncomingWebhook {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  botId       String?  @map("bot_id") // Optional - can be standalone
+  channelId   String   @map("channel_id")
+  name        String
+  description String?
+  token       String   @unique // Webhook URL token
+  createdBy   String   @map("created_by")
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  bot       Bot?      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@map("incoming_webhooks")
+}
+
+model OutgoingWebhook {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  botId       String?  @map("bot_id")
+  name        String
+  description String?
+  url         String   // Destination URL
+  secret      String   // HMAC signing secret
+  events      String[] // Array of event types to subscribe to
+  channelIds  String[] @map("channel_ids") // Optional: limit to specific channels
+  createdBy   String   @map("created_by")
+  isEnabled   Boolean  @default(true) @map("is_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace  Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  bot        Bot?               @relation(fields: [botId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@map("outgoing_webhooks")
+}
+
+model WebhookDelivery {
+  id              String   @id @default(uuid())
+  webhookId       String   @map("webhook_id")
+  eventType       String   @map("event_type")
+  payload         Json
+  responseStatus  Int?     @map("response_status")
+  responseBody    String?  @map("response_body")
+  deliveredAt     DateTime? @map("delivered_at")
+  retryCount      Int      @default(0) @map("retry_count")
+  nextRetryAt     DateTime? @map("next_retry_at")
+  status          String   @default("pending") // pending, delivered, failed
+  errorMessage    String?  @map("error_message")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  webhook OutgoingWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, status])
+  @@index([status, nextRetryAt])
+  @@map("webhook_deliveries")
+}
+
+model SlashCommand {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  botId       String   @map("bot_id")
+  command     String   // e.g., "/mybot"
+  description String
+  usageHint   String?  @map("usage_hint") // e.g., "[task] [time]"
+  url         String   // URL to POST command data to
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  bot       Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, command])
+  @@map("slash_commands")
+}
+
+model InteractiveMessageAction {
+  id         String   @id @default(uuid())
+  messageId  String   @map("message_id")
+  actionId   String   @map("action_id") // Unique ID for the action
+  type       String   // button, select, overflow
+  label      String
+  value      String?
+  style      String?  // primary, danger, default
+  url        String?  // For link buttons
+  confirm    Json?    // Confirmation dialog config
+  options    Json?    // For select menus
+  position   Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("interactive_message_actions")
+}
+
+// ============================================
+// Server Administration Models
+// ============================================
+
+// Global server settings (singleton - only one row)
+model ServerSettings {
+  id                      String   @id @default("default")
+  serverName              String   @default("TeamChat") @map("server_name")
+  serverDescription       String?  @map("server_description")
+  allowPublicRegistration Boolean  @default(true) @map("allow_public_registration")
+  requireEmailVerification Boolean @default(false) @map("require_email_verification")
+  maxWorkspacesPerUser    Int      @default(10) @map("max_workspaces_per_user")
+  maxMembersPerWorkspace  Int      @default(100) @map("max_members_per_workspace")
+  maxFileUploadSize       Int      @default(10485760) @map("max_file_upload_size") // 10MB
+  allowedFileTypes        String[] @map("allowed_file_types") // Empty = all allowed
+  enableE2EE              Boolean  @default(true) @map("enable_e2ee")
+  maintenanceMode         Boolean  @default(false) @map("maintenance_mode")
+  maintenanceMessage      String?  @map("maintenance_message")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@map("server_settings")
+}
+
+// Detailed admin audit log for tracking all admin actions
+model AdminAuditLog {
+  id          String   @id @default(uuid())
+  adminId     String   @map("admin_id")
+  action      String   // e.g., "user.suspend", "workspace.disable", "settings.update"
+  targetType  String   @map("target_type") // "user", "workspace", "settings", etc.
+  targetId    String?  @map("target_id")
+  details     Json     @default("{}")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@map("admin_audit_logs")
+}
+
+// System announcements from admins
+model SystemAnnouncement {
+  id          String    @id @default(uuid())
+  title       String
+  content     String
+  type        String    @default("info") // info, warning, critical
+  isActive    Boolean   @default(true) @map("is_active")
+  startsAt    DateTime  @default(now()) @map("starts_at")
+  endsAt      DateTime? @map("ends_at")
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([isActive, startsAt, endsAt])
+  @@map("system_announcements")
+}
+
+// ============================================
+// End-to-End Encryption (E2EE) Models
+// ============================================
+
+// User's identity key pair for E2EE (public key stored, private key only on device)
+model UserEncryptionKey {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  deviceId          String   @map("device_id") // Support for multi-device
+  publicKey         String   @map("public_key") // X25519 public key (Base64)
+  keySignature      String   @map("key_signature") // Signature for key verification
+  algorithm         String   @default("X25519") // Key exchange algorithm
+  isActive          Boolean  @default(true) @map("is_active")
+  lastUsedAt        DateTime? @map("last_used_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  revokedAt         DateTime? @map("revoked_at")
+
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sentKeyExchanges  ConversationKeyShare[] @relation("KeyShareSender")
+  receivedKeyShares ConversationKeyShare[] @relation("KeyShareRecipient")
+
+  @@unique([userId, deviceId])
+  @@index([userId, isActive])
+  @@map("user_encryption_keys")
+}
+
+// Encrypted conversation keys shared between participants
+model ConversationKeyShare {
+  id                  String   @id @default(uuid())
+  conversationType    String   @map("conversation_type") // 'channel' or 'dm'
+  conversationId      String   @map("conversation_id") // channelId or dmThreadId
+  senderKeyId         String   @map("sender_key_id") // Sender's UserEncryptionKey
+  recipientKeyId      String   @map("recipient_key_id") // Recipient's UserEncryptionKey
+  encryptedKey        String   @map("encrypted_key") // Symmetric key encrypted for recipient (Base64)
+  keyVersion          Int      @default(1) @map("key_version") // For key rotation
+  nonce               String   // Random nonce used for encryption (Base64)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  senderKey           UserEncryptionKey @relation("KeyShareSender", fields: [senderKeyId], references: [id], onDelete: Cascade)
+  recipientKey        UserEncryptionKey @relation("KeyShareRecipient", fields: [recipientKeyId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, recipientKeyId, keyVersion])
+  @@index([conversationId, keyVersion])
+  @@map("conversation_key_shares")
+}
