@@ -205,24 +205,57 @@ export async function buildApp() {
   // Health check with optional detailed info
   app.get('/health', async (request) => {
     const detailed = request.query && 'detailed' in (request.query as object);
-    
+
     const response: Record<string, unknown> = {
       status: 'ok',
       timestamp: new Date().toISOString(),
     };
-    
+
     // Only return detailed info in dev or if explicitly requested
     if (config.isDev || detailed) {
       response.version = process.env.npm_package_version || '1.0.0';
       response.uptime = process.uptime();
       response.memory = process.memoryUsage();
     }
-    
+
     return response;
   });
 
-  // Readiness check (for Kubernetes)
-  app.get('/ready', async () => ({ status: 'ready' }));
+  // Readiness check (for Kubernetes) - includes dependency health
+  app.get('/ready', async (request, reply) => {
+    const checks: Record<string, { status: string; latency?: number }> = {};
+    let isReady = true;
+
+    // Check database connectivity
+    try {
+      const { prisma } = await import('./lib/db.js');
+      const dbStart = Date.now();
+      await prisma.$queryRaw`SELECT 1`;
+      checks.database = { status: 'ok', latency: Date.now() - dbStart };
+    } catch {
+      checks.database = { status: 'error' };
+      isReady = false;
+    }
+
+    // Check Redis connectivity
+    try {
+      const { redis } = await import('./lib/redis.js');
+      const redisStart = Date.now();
+      await redis.ping();
+      checks.redis = { status: 'ok', latency: Date.now() - redisStart };
+    } catch {
+      checks.redis = { status: 'error' };
+      isReady = false;
+    }
+
+    const status = isReady ? 'ready' : 'not_ready';
+    const statusCode = isReady ? 200 : 503;
+
+    return reply.status(statusCode).send({ status, checks });
+  });
+
+  // Liveness check (for Kubernetes) - simple check that process is running
+  app.get('/live', async () => ({ status: 'alive' }));
 
   // Register routes
   await app.register(authRoutes, { prefix: '/auth' });

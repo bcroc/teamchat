@@ -10,6 +10,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
     },
+    // Set environment variables before tests run
+    env: {
+      NODE_ENV: 'test',
+      JWT_SECRET: 'test-secret-key-for-testing-minimum-32-chars',
+      CORS_ORIGIN: 'http://localhost:5173',
+    },
   },
   resolve: {
     alias: {

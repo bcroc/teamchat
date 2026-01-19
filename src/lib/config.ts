@@ -11,12 +11,12 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_URL: z.string().url().optional(),
-  
-  // Security
-  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters').optional(),
-  
-  // CORS
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+
+  // Security - JWT_SECRET is REQUIRED (no weak defaults)
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+
+  // CORS - no default in production, must be explicitly configured
+  CORS_ORIGIN: z.string(),
   
   // Rate limiting
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
@@ -38,31 +38,56 @@ const envSchema = z.object({
 });
 
 /**
+ * Generate a development-only secret (DO NOT use in production)
+ * This is only used when NODE_ENV=development and no JWT_SECRET is provided
+ */
+function getDevDefaults(): Partial<Record<string, string>> {
+  if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+    return {
+      JWT_SECRET: process.env.JWT_SECRET || 'dev-only-secret-do-not-use-in-production-32chars',
+      CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    };
+  }
+  return {};
+}
+
+/**
  * Parse and validate environment variables
  * Throws descriptive errors if validation fails
  */
 function parseEnv() {
-  const result = envSchema.safeParse(process.env);
-  
+  const envWithDefaults = { ...getDevDefaults(), ...process.env };
+  const result = envSchema.safeParse(envWithDefaults);
+
   if (!result.success) {
     const errors = result.error.errors.map(e => `  - ${e.path.join('.')}: ${e.message}`).join('\n');
     console.error('❌ Environment validation failed:\n' + errors);
-    
-    if (process.env.NODE_ENV === 'production') {
-      process.exit(1);
-    }
+    console.error('\n💡 Required environment variables:');
+    console.error('   JWT_SECRET: Generate with: openssl rand -base64 32');
+    console.error('   CORS_ORIGIN: Comma-separated list of allowed origins');
+    process.exit(1);
   }
-  
-  return result.success ? result.data : envSchema.parse({});
+
+  return result.data;
 }
 
 const env = parseEnv();
 
-// Validate JWT_SECRET in production
+// Additional production security checks
 if (env.NODE_ENV === 'production') {
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-    console.error('❌ JWT_SECRET must be at least 32 characters in production');
-    process.exit(1);
+  // Warn if CORS allows all origins
+  if (env.CORS_ORIGIN === '*') {
+    console.warn('⚠️  Warning: CORS_ORIGIN is set to "*" - this is insecure in production');
+  }
+
+  // Warn if using localhost in production CORS
+  if (env.CORS_ORIGIN.includes('localhost')) {
+    console.warn('⚠️  Warning: CORS_ORIGIN contains localhost - ensure this is intentional');
+  }
+
+  // Warn if TURN servers are not configured
+  if (!process.env.TURN_URLS) {
+    console.warn('⚠️  Warning: TURN_URLS not configured - WebRTC may fail behind strict NATs');
   }
 }
 
