@@ -21,6 +21,7 @@ import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { config } from './lib/config.js';
 import { AppError } from './lib/errors.js';
+import { isTailscaleOrigin } from './lib/tailscale.js';
 import { HTTP_STATUS } from '@teamchat/shared';
 
 // Route handlers
@@ -99,7 +100,30 @@ export async function buildApp() {
   });
 
   await app.register(cors, {
-    origin: config.cors.origin,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (Electron apps, curl, server-to-server)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Allow file:// origin (Electron app)
+      if (origin === 'file://' || origin === 'null') {
+        return callback(null, true);
+      }
+
+      // Allow explicitly configured origins
+      if (config.cors.origin.includes(origin) || config.cors.origin.includes('*')) {
+        return callback(null, true);
+      }
+
+      // Allow Tailscale IP origins (100.64.x.x - 100.127.x.x)
+      if (isTailscaleOrigin(origin)) {
+        return callback(null, true);
+      }
+
+      // Reject other origins
+      callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+    },
     credentials: config.cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],

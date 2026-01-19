@@ -1,5 +1,15 @@
 import type { IceServer } from '@teamchat/shared';
 import { z } from 'zod';
+import { isTailscaleIP } from './tailscale.js';
+
+/**
+ * Custom Zod validator for Tailscale IP addresses
+ * Validates that the IP is in the CGNAT range 100.64.0.0/10
+ */
+const tailscaleIPSchema = z.string().refine(
+  (ip) => isTailscaleIP(ip),
+  { message: 'TAILSCALE_IP must be a valid Tailscale IP (100.64.x.x - 100.127.x.x)' }
+);
 
 /**
  * Environment configuration schema with validation
@@ -11,6 +21,9 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_URL: z.string().url().optional(),
+
+  // Tailscale - bind exclusively to tailnet interface
+  TAILSCALE_IP: tailscaleIPSchema.optional(),
 
   // Security - JWT_SECRET is REQUIRED (no weak defaults)
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
@@ -97,12 +110,19 @@ if (env.NODE_ENV === 'production') {
  */
 export const config = {
   port: env.PORT,
-  host: env.HOST,
+  // Use TAILSCALE_IP if set, otherwise fall back to HOST
+  host: env.TAILSCALE_IP || env.HOST,
   nodeEnv: env.NODE_ENV,
   isDev: env.NODE_ENV === 'development',
   isProd: env.NODE_ENV === 'production',
   isTest: env.NODE_ENV === 'test',
   apiUrl: env.API_URL || `http://localhost:${env.PORT}`,
+
+  // Tailscale configuration
+  tailscale: {
+    ip: env.TAILSCALE_IP,
+    isEnabled: !!env.TAILSCALE_IP,
+  },
 
   cors: {
     origin: env.CORS_ORIGIN.split(',').map(s => s.trim()),

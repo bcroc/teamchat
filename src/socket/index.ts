@@ -21,6 +21,8 @@ import { Server, Socket } from 'socket.io';
 import { verifyToken } from '../lib/auth.js';
 import { prisma } from '../lib/db.js';
 import { redis, setUserOnline, setUserOffline, setTyping, clearTyping } from '../lib/redis.js';
+import { isTailscaleOrigin } from '../lib/tailscale.js';
+import { config } from '../lib/config.js';
 import { SOCKET_EVENTS } from '@teamchat/shared';
 import type {
   JoinChannelInput,
@@ -62,7 +64,30 @@ export function getSocketServer(): Server {
 export function setupSocketServer(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+      origin: (origin, callback) => {
+        // Allow requests with no origin (Electron apps, curl, server-to-server)
+        if (!origin) {
+          return callback(null, true);
+        }
+
+        // Allow file:// origin (Electron app)
+        if (origin === 'file://' || origin === 'null') {
+          return callback(null, true);
+        }
+
+        // Allow explicitly configured origins
+        if (config.cors.origin.includes(origin) || config.cors.origin.includes('*')) {
+          return callback(null, true);
+        }
+
+        // Allow Tailscale IP origins (100.64.x.x - 100.127.x.x)
+        if (isTailscaleOrigin(origin)) {
+          return callback(null, true);
+        }
+
+        // Reject other origins
+        callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+      },
       credentials: true,
     },
     pingInterval: 25000,
