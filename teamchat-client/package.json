@@ -1,0 +1,32 @@
+{
+  "name": "teamchat-client",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TeamChat desktop application - Electron + React",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "pnpm build:packages && electron-vite build",
+    "build:packages": "pnpm --filter @teamchat/shared build && pnpm --filter @teamchat/webrtc build",
+    "preview": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
+    "build:mac": "pnpm build && electron-builder --mac",
+    "build:win": "pnpm build && electron-builder --win",
+    "build:linux": "pnpm build && electron-builder --linux",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf out dist-electron node_modules packages/*/dist"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@10.28.2"
+}
